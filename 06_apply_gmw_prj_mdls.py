@@ -49,7 +49,7 @@ bands = [
     "MVI",
 ]
 
-year = 2000
+year = 2002
 
 start_date = datetime.datetime(year=year, month=1, day=1)
 end_date = datetime.datetime(year=year, month=12, day=31)
@@ -59,11 +59,14 @@ out_gdrive_dir = f"gmw_{year}_mng_count_tiles"
 
 gmw_hab_msk_img = ee.Image('projects/ee-petebunting-gmw/assets/gmw_v23_hab_msk')
 
+def apply_gmw_msk(img):
+  return img.updateMask(gmw_hab_msk_img)
+
 mdls_created_lut_dir = "gmw_prj_mdls_created"
 sub_cls_lut_dir = "gmw_tiles_cls_sub"
 
-prj_rgns_vec_file = "gmw_tiles_prj_def.geojson"
-prj_rgns_vec_lyr = "gmw_tiles_prj_def"
+prj_rgns_vec_file = "gmw_tiles_prj_def_hab_intersect.geojson"
+prj_rgns_vec_lyr = "gmw_tiles_prj_def_hab_intersect"
 prjs_col_name = "gmw_prj"
 tiles_col_name = "gmw_tile_name"
 
@@ -72,9 +75,9 @@ prjs_unq_col = prj_tiles_gdf[prjs_col_name]
 prjs_names = prjs_unq_col.unique()
 
 start_prj = 0
-n_prjs = 50#len(prjs_names)
+n_prjs = len(prjs_names)
 print(f"n_prjs: {n_prjs}\n")
-end_tile = (n_prjs-start_prj)
+end_tile = 60#(n_prjs-start_prj)
 
 prjs_names = prjs_names[start_prj:end_tile]
 
@@ -89,13 +92,13 @@ for prj_name in prjs_names:
     mdl_lut_file = os.path.join(mdls_created_lut_dir, f"{prj_name}_mdl_{mdl_n}.txt")
     cls_mdl_asset_id = f'projects/ee-petebunting-gmw/assets/gmw_ls_cls_mdls/{prj_name}_rf_cls_{mdl_n}'
     trained_cls = ee.Classifier.load(cls_mdl_asset_id)
-    if True:#os.path.exists(mdl_lut_file):
+    if os.path.exists(mdl_lut_file):
         prj_sub_gdf = prj_tiles_gdf[prj_tiles_gdf[prjs_col_name] == prj_name]
 
         tile_names = prj_sub_gdf[tiles_col_name]
         for tile_name in tile_names:
             print(f"\t{tile_name}")
-            out_cls_name = f"{tile_name}_mng_cls_count_{mdl_n}"
+            out_cls_name = f"{tile_name}_{year}_mng_cls_count_{mdl_n}"
             lut_chk_file = os.path.join(sub_cls_lut_dir, f"{out_cls_name}_subd.txt")
 
             if not os.path.exists(lut_chk_file):
@@ -120,6 +123,8 @@ for prj_name in prjs_names:
                     out_lstm_bands=True,
                 ).select(["Blue", "Green", "Red", "NIR", "SWIR1", "SWIR2"])
 
+                ls_img_col = ls_img_col.map(apply_gmw_msk)
+
                 ls_indices_img_col = ls_img_col.map(calc_band_indices)
                 ls_vld_msk_img_col = ls_img_col.map(calc_vld_msk)
 
@@ -130,8 +135,8 @@ for prj_name in prjs_names:
 
                 cls_mng_imgs = ls_indices_img_col.map(apply_cls)
 
-                cls_mng_img = cls_mng_imgs.reduce(ee.Reducer.sum()).mask(gmw_hab_msk_img)
-                vld_msk_img = ls_vld_msk_img_col.reduce(ee.Reducer.sum()).mask(gmw_hab_msk_img)
+                cls_mng_img = cls_mng_imgs.reduce(ee.Reducer.sum())#.mask(gmw_hab_msk_img)
+                vld_msk_img = ls_vld_msk_img_col.reduce(ee.Reducer.sum())#.mask(gmw_hab_msk_img)
                 out_img = ee.ImageCollection([cls_mng_img, vld_msk_img]).toBands().toInt()
 
                 task = ee.batch.Export.image.toDrive(
